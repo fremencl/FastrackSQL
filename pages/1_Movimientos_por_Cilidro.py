@@ -1,52 +1,33 @@
 import streamlit as st
-import gspread
-from google.oauth2 import service_account
+import mysql.connector
 import pandas as pd
-
-# 1) Importamos la función de autenticación
 from auth import check_password
 
-# Primero verificamos la contraseña.
+# 1) Validación de contraseña
 if not check_password():
     st.stop()
 
-# ------------------------------------------------------------------
-# Función de carga desde Google Sheets
-# ------------------------------------------------------------------
-def get_gsheet_data(sheet_name: str) -> pd.DataFrame | None:
-    try:
-        creds_dict = st.secrets["gcp_service_account"]
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ]
-        credentials = service_account.Credentials.from_service_account_info(
-            creds_dict, scopes=scopes
-        )
-        client = gspread.authorize(credentials)
-        sheet = client.open("TRAZABILIDAD").worksheet(sheet_name)
-        return pd.DataFrame(sheet.get_all_records())
-    except Exception as e:
-        st.error(f"Error al conectar con Google Sheets: {e}")
-        return None
-
-# ------------------------------------------------------------------
-# Cargar datos
-# ------------------------------------------------------------------
-df_proceso = get_gsheet_data("PROCESO")
-df_detalle = get_gsheet_data("DETALLE")
-
-# Normalizar columna SERIE en df_detalle
-if df_detalle is not None:
-    df_detalle["SERIE"] = (
-        df_detalle["SERIE"]
-        .astype(str)
-        .str.replace(",", "", regex=False)
+# 2) Función de conexión y carga desde Cloud SQL
+def get_sql_data(query: str) -> pd.DataFrame:
+    conn = mysql.connector.connect(
+        host=st.secrets["mysql"]["host"],
+        user=st.secrets["mysql"]["user"],
+        password=st.secrets["mysql"]["password"],
+        database=st.secrets["mysql"]["database"],
+        port=st.secrets["mysql"]["port"]
     )
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
 
-# ------------------------------------------------------------------
-# UI
-# ------------------------------------------------------------------
+# 3) Ejecutar queries para cargar los datasets
+df_proceso = get_sql_data("SELECT * FROM PROCESO;")
+df_detalle = get_sql_data("SELECT * FROM DETALLE;")
+
+# 4) Normalizar columna SERIE (igual que antes)
+df_detalle["SERIE"] = df_detalle["SERIE"].astype(str).str.replace(",", "", regex=False)
+
+# 5) UI (idéntica)
 st.title("FASTRACK")
 st.subheader("CONSULTA DE MOVIMIENTOS POR CILINDRO")
 
@@ -54,16 +35,12 @@ target_cylinder = st.text_input("Ingrese la ID del cilindro a buscar:")
 
 if st.button("Buscar"):
     if target_cylinder:
-        # Limpiamos el input
         target_cylinder_normalized = target_cylinder.replace(",", "")
-
-        # 1) Filtrar df_detalle para este cilindro
         df_det_for_cyl = df_detalle.loc[
             df_detalle["SERIE"] == target_cylinder_normalized,
             ["IDPROC", "SERIE", "SERVICIO"]
         ]
 
-        # 2) Filtrar procesos cuyo IDPROC esté en esa lista
         df_proc_for_cyl = df_proceso[
             df_proceso["IDPROC"].isin(df_det_for_cyl["IDPROC"])
         ]
@@ -71,7 +48,6 @@ if st.button("Buscar"):
         if df_proc_for_cyl.empty:
             st.warning("No se encontraron movimientos para el cilindro ingresado.")
         else:
-            # 3) Hacemos merge para unir información de proceso + servicio
             df_resultados = df_proc_for_cyl.merge(
                 df_det_for_cyl,
                 on="IDPROC",
@@ -85,9 +61,6 @@ if st.button("Buscar"):
                 ]
             )
 
-            # ------------------------------------------------------------------
-            # Función compacta para convertir a CSV y luego a bytes
-            # ------------------------------------------------------------------
             def convert_to_csv(dataframe: pd.DataFrame) -> bytes:
                 return dataframe.to_csv(index=False).encode("utf-8")
 
