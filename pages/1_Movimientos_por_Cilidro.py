@@ -1,21 +1,29 @@
 import streamlit as st
 import mysql.connector
 import pandas as pd
+import os
 from auth import check_password
 
 # 1) Validación de contraseña
 if not check_password():
     st.stop()
 
-# 2) Función de conexión y carga desde Cloud SQL
+# 2) Función de conexión y carga desde Cloud SQL via Cloud Run
 def get_sql_data(query: str) -> pd.DataFrame:
+    # Leemos las variables de entorno que cargamos en Cloud Run
+    db_user = os.getenv("DB_USER")
+    db_pass = os.getenv("DB_PASS")
+    db_name = os.getenv("DB_NAME")
+    instance_connection_name = os.getenv("INSTANCE_CONNECTION_NAME")
+
+    # Conexión usando el Cloud SQL Proxy (unix_socket)
     conn = mysql.connector.connect(
-        host=st.secrets["mysql"]["host"],
-        user=st.secrets["mysql"]["user"],
-        password=st.secrets["mysql"]["password"],
-        database=st.secrets["mysql"]["database"],
-        port=st.secrets["mysql"]["port"]
+        user=db_user,
+        password=db_pass,
+        database=db_name,
+        unix_socket=f"/cloudsql/{instance_connection_name}"
     )
+    
     df = pd.read_sql(query, conn)
     conn.close()
     return df
