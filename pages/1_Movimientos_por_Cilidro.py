@@ -10,20 +10,22 @@ if not check_password():
 
 # 2) Función de conexión y carga desde Cloud SQL via Cloud Run
 def get_sql_data(query: str) -> pd.DataFrame:
-    # Leemos las variables de entorno que cargamos en Cloud Run
+    # Leemos las variables de entorno
     db_user = os.getenv("DB_USER")
     db_pass = os.getenv("DB_PASS")
     db_name = os.getenv("DB_NAME")
     instance_connection_name = os.getenv("INSTANCE_CONNECTION_NAME")
 
-    # Conexión usando el Cloud SQL Proxy (unix_socket)
-    conn = mysql.connector.connect(
-        user=db_user,
-        password=db_pass,
-        database=db_name,
-        unix_socket=f"/cloudsql/{instance_connection_name}"
-    )
-    
+    # Armamos la configuración de conexión
+    conn_config = {
+        "user": db_user,
+        "password": db_pass,
+        "database": db_name,
+        "unix_socket": f"/cloudsql/{instance_connection_name}",
+    }
+
+    # Nos conectamos
+    conn = mysql.connector.connect(**conn_config)
     df = pd.read_sql(query, conn)
     conn.close()
     return df
